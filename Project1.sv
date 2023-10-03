@@ -1,0 +1,292 @@
+`include "config.svh"
+
+// Asynchronous reset here is needed for some FPGA boards we use
+
+// `define USE_DIGILENT_PMOD_MIC3
+// `define USE_INMP_441_MIC_ON_OLD_POSITION
+
+`ifdef USE_DIGILENT_PMOD_MIC3
+    `define USE_SDRAM_PINS_AS_GPIO
+`elsif USE_INMP_441_MIC_ON_OLD_POSITION
+    `define USE_SDRAM_PINS_AS_GPIO
+`else
+    `define USE_LCD_AS_GPIO
+`endif
+
+module top
+# (
+    parameter clk_mhz = 50,
+              w_key   = 4,
+              w_sw    = 8,
+              w_led   = 8,
+              w_digit = 8,
+              w_gpio  = 20
+)
+(
+    input                        clk,
+    input                        rst,
+
+    // Keys, switches, LEDs
+
+    input        [w_key   - 1:0] key,
+    input        [w_sw    - 1:0] sw,
+    output logic [w_led   - 1:0] led,
+
+    // A dynamic seven-segment display
+
+    output logic [          7:0] abcdefgh,
+    output logic [w_digit - 1:0] digit,
+
+    // VGA
+
+    output logic                 vsync,
+    output logic                 hsync,
+    output logic [          3:0] red,
+    output logic [          3:0] green,
+    output logic [          3:0] blue,
+
+    input        [         23:0] mic,
+
+    // General-purpose Input/Output
+
+    inout        [w_gpio  - 1:0] gpio
+);
+
+    //------------------------------------------------------------------------
+
+    // assign led      = '0;
+       assign abcdefgh = '0;
+       assign digit    = '0;
+       assign vsync    = '0;
+       assign hsync    = '0;
+       assign red      = '0;
+       assign green    = '0;
+       assign blue     = '0;
+
+    //------------------------------------------------------------------------
+
+    wire a = key [0];
+    wire b = key [1];
+
+    wire result = a ^ b;
+
+    assign led [0] = result;
+
+    assign led [1] = key [0] ^ key [1];
+
+    //------------------------------------------------------------------------
+
+	 /*
+    `ifndef VERILATOR
+
+    generate
+        if (w_led > 2)
+        begin : unused_led
+            assign led [w_led - 1:2] = '0;
+        end
+    endgenerate
+
+    `endif
+*/
+    //------------------------------------------------------------------------
+
+    // Exercise 1: Change the code below.
+    // Assign to led [2] the result of AND operation.
+    //
+    // If led [2] is not available on your board,
+    // comment out the code above and reuse led [0].
+
+    assign led [2] = a & b;
+
+    // Exercise 2: Change the code below.
+    // Assign to led [3] the result of XOR operation
+    // without using "^" operation.
+    // Use only operations "&", "|", "~" and parenthesis, "(" and ")".
+
+	 // XOR (A, B) is (A OR B) AND (NOT (A AND B))
+    assign led [3] = (a | b) & (~ (a & b) );
+
+    // Exercise 3: Create an illustration to De Morgan's laws:
+    //
+    // ~ (a & b) == ~ a | ~ b
+    // ~ (a | b) == ~ a & ~ b
+
+endmodule
+
+
+
+//----------------------------------------------------------------------------
+
+module board_specific_top
+# (
+    parameter clk_mhz = 50,
+              w_key   = 4,
+              w_sw    = 4,
+              w_led   = 4,
+              w_digit = 4,
+
+              `ifdef USE_SDRAM_PINS_AS_GPIO
+              w_gpio  = 14
+              `elif USE_LCD_AS_GPIO
+              w_gpio  = 11
+              `else
+              w_gpio  = 1
+              `endif
+)
+(
+    input                  CLK,
+    input                  RESET,
+
+    input  [w_key   - 1:0] KEY,
+    output [w_led   - 1:0] LED,
+
+    output [          7:0] SEG,
+    output [w_digit - 1:0] DIG,
+
+    output                 VGA_HSYNC,
+    output                 VGA_VSYNC,
+    output                 VGA_R,
+    output                 VGA_G,
+    output                 VGA_B,
+
+    input                  UART_RXD,
+
+    inout  [w_gpio  - 1:0] PSEUDO_GPIO_USING_SDRAM_PINS,
+
+    inout                  LCD_RS,
+    inout                  LCD_RW,
+    inout                  LCD_E,
+    inout  [          7:0] LCD_D
+);
+
+    //------------------------------------------------------------------------
+
+    wire               clk     =   CLK;
+    wire               rst     = ~ RESET;
+    wire [w_sw  - 1:0] top_sw  = ~ KEY [w_sw - 1:0];
+    wire [w_key - 1:0] top_key = ~ KEY;
+
+    //------------------------------------------------------------------------
+
+    wire  [w_led   - 1:0] top_led;
+
+    wire  [          7:0] abcdefgh;
+    wire  [w_digit - 1:0] digit;
+
+    wire                  vga_vs, vga_hs;
+    wire  [          3:0] red, green, blue;
+
+    wire  [         23:0] mic;
+
+    //------------------------------------------------------------------------
+
+    top
+    # (
+        .clk_mhz ( clk_mhz ),
+        .w_key   ( w_key   ),
+        .w_sw    ( w_sw    ),
+        .w_led   ( w_led   ),
+        .w_digit ( w_digit ),
+        .w_gpio  ( w_gpio  )
+    )
+    i_top
+    (
+        .clk      (   clk          ),
+        .rst      (   rst          ),
+
+        .key      (   top_key      ),
+        .sw       (   top_sw       ),
+
+        .led      (   top_led      ),
+
+        .abcdefgh (   abcdefgh     ),
+        .digit    (   digit        ),
+
+        .vsync    (   VGA_VSYNC    ),
+        .hsync    (   VGA_HSYNC    ),
+
+        .red      (   red          ),
+        .green    (   green        ),
+        .blue     (   blue         ),
+
+        .mic      (   mic          ),
+
+        `ifdef USE_SDRAM_PINS_AS_GPIO
+            .gpio ( PSEUDO_GPIO_USING_SDRAM_PINS )
+        `elif USE_LCD_AS_GPIO
+            .gpio ({ LCD_RS, LCD_RW, LCD_E, LCD_D })
+        `endif
+    );
+
+    //------------------------------------------------------------------------
+
+    assign LED       = ~ top_led;
+
+    assign SEG       = ~ abcdefgh;
+    assign DIG       = ~ digit;
+
+    assign VGA_R     = | red;
+    assign VGA_G     = | green;
+    assign VGA_B     = | blue;
+
+    //------------------------------------------------------------------------
+
+    `ifdef USE_DIGILENT_PMOD_MIC3
+
+    wire [15:0] mic_16;
+
+    digilent_pmod_mic3_spi_receiver i_microphone
+    (
+        .clk   ( clk                               ),
+        .rst   ( rst                               ),
+        .cs    ( PSEUDO_GPIO_USING_SDRAM_PINS  [0] ),
+        .sck   ( PSEUDO_GPIO_USING_SDRAM_PINS  [6] ),
+        .sdo   ( PSEUDO_GPIO_USING_SDRAM_PINS  [4] ),
+        .value ( mic_16                            )
+    );
+
+    assign PSEUDO_GPIO_USING_SDRAM_PINS [ 8] = 1'b0;  // GND
+    assign PSEUDO_GPIO_USING_SDRAM_PINS [10] = 1'b1;  // VCC
+
+    assign mic = { mic_16, 8'b0 };
+
+    //------------------------------------------------------------------------
+
+    `elsif USE_INMP_441_MIC_ON_OLD_POSITION
+
+    inmp441_mic_i2s_receiver i_microphone
+    (
+        .clk   ( clk                               ),
+        .rst   ( rst                               ),
+        .lr    ( PSEUDO_GPIO_USING_SDRAM_PINS  [5] ),
+        .ws    ( PSEUDO_GPIO_USING_SDRAM_PINS  [3] ),
+        .sck   ( PSEUDO_GPIO_USING_SDRAM_PINS  [1] ),
+        .sd    ( PSEUDO_GPIO_USING_SDRAM_PINS  [0] ),
+        .value ( mic                               )
+    );
+
+    assign PSEUDO_GPIO_USING_SDRAM_PINS [4] = 1'b0;  // GND
+    assign PSEUDO_GPIO_USING_SDRAM_PINS [2] = 1'b1;  // VCC
+
+    //------------------------------------------------------------------------
+
+    `else  // USE_INMP_441_MIC
+
+/*    inmp441_mic_i2s_receiver i_microphone
+    (
+        .clk   ( clk       ),
+        .rst   ( rst       ),
+        .lr    ( LCD_D [1] ),
+        .ws    ( LCD_D [2] ),
+        .sck   ( LCD_D [3] ),
+        .sd    ( LCD_D [6] ),
+        .value ( mic       )
+    );*/
+
+    assign LCD_D [4] = 1'b0;  // GND
+    assign LCD_D [5] = 1'b1;  // VCC
+
+    `endif
+
+endmodule
+
